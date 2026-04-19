@@ -108,6 +108,7 @@ class SM64World(World):
 				"Rainbow Road Trap": self.options.Rr_Per.value,
 			}
 			total_weight = sum(trap_weights.values())
+		# Generate traps percentage
 			if trap_count > 0:
 				if total_weight > 0:
 					trap_names = list(trap_weights.keys())
@@ -129,13 +130,16 @@ class SM64World(World):
 							trap_counts[sorted_traps[i % len(sorted_traps)]] += 1
 					for trap_name in trap_names:
 						itempool += [self.create_item(trap_name) for _ in range(trap_counts[trap_name])]
+			#Toad Souls
 			itempool += [
 				self.create_item(toad_soul_name)
 				for toad_soul_name in Toad_Soul_item_data_table
 				for _ in range(1)
 			]
 			filler_pool_counts = {name: self.filler_count for name in filler_names}
+		    # Koopa Shells
 			filler_pool_counts["Koopa Shell"] = 20
+		    # For making the Filler Percent
 			filler_pool_total = sum(filler_pool_counts.values())
 			placed = 0
 			filler_pool_names = list(filler_pool_counts.keys())
@@ -147,10 +151,13 @@ class SM64World(World):
 					count = (filler_count_remaining * base_count) // filler_pool_total
 					placed += count
 				itempool += [self.create_item(filler_name) for _ in range(count)]
+			# Powers Stars
 			star_range = self.number_of_stars
+		# Vanilla 100 Coin stars have to removed from the pool if other max star increasing options are active.
 			if self.options.enable_coin_stars == "vanilla":
 				star_range -= 15
 			itempool += [self.create_item("Power Star") for _ in range(star_range)]
+		 #Keys
 			if not self.options.progressive_keys:
 				itempool += [
 					self.create_item("Basement Key"),
@@ -158,20 +165,24 @@ class SM64World(World):
 				]
 			else:
 				itempool += [self.create_item("Progressive Key") for _ in range(4)]
+			#Caps
 			itempool += [
 				self.create_item(cap_name)
 				for cap_name in ["Wing Cap", "Metal Cap", "Tanish Cap"]
 			]
+		    # Cannons
 			if self.options.buddy_checks:
 				itempool += [
 					self.create_item(cannon_name)
 					for cannon_name in cannon_item_data_table.keys()
 				]
+			# paintings
 			if self.options.enable_locked_paintings:
 				itempool += [
 					self.create_item(painting_name)
 					for painting_name in painting_unlock_item_data_table.keys()
 				]
+			# Moves
 			double_jump_bitvec_offset = action_item_data_table["Double Jump"].code
 			itempool += [
 				self.create_item(action)
