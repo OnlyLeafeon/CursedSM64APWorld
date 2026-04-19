@@ -151,6 +151,54 @@ class MoveRandomizerActions(OptionSet):
     valid_keys = [action for action in action_item_data_table if action != 'Double Jump']
     default = valid_keys
 
+class TotalTrapPercentage(Range):
+    display_name = "Total Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 10
+    
+class BonkTrapPercentage(Range):
+    display_name = "Bonk Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 15
+    
+class FireTrapPercentage(Range):
+    display_name = "Fire Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 15
+    
+class ShockTrapPercentage(Range):
+    display_name = "Shock Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 15
+    
+class ChuckTrapPercentage(Range):
+    display_name = "Chuck Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 15
+    
+class SpinTrapPercentage(Range):
+    display_name = "Spin Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 15
+    
+class LiteratureTrapPercentage(Range):
+    display_name = "Literature Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 20
+    
+class RainbowRoadTrapPercentage(Range):
+    display_name = "Rainbow Road Trap Percentage in Pool"
+    range_start = 0
+    range_end = 100
+    default = 15
+
 sm64_options_groups = [
     OptionGroup("Logic Options", [
         AreaRandomizer,
@@ -176,6 +224,16 @@ sm64_options_groups = [
         MIPS2Cost,
         StarsToFinish,
     ]),
+    OptionGroup("Trap Options", [
+        TotalTrapPercentage,
+        BonkTrapPercentage,
+        FireTrapPercentage,
+        ShockTrapPercentage,
+        ChuckTrapPercentage,
+        SpinTrapPercentage,
+        LiteratureTrapPercentage,
+        RainbowRoadTrapPercentage,
+    ]),
 ]
 
 @dataclass
@@ -200,3 +258,11 @@ class SM64Options(PerGameCommonOptions):
     stars_to_finish: StarsToFinish
     death_link: DeathLink
     completion_type: CompletionType
+    Trap_Per:TotalTrapPercentage
+    Bonk_Per:BonkTrapPercentage
+    Fire_Per:FireTrapPercentage
+    Shock_Per:ShockTrapPercentage
+    Chuck_Per:ChuckTrapPercentage
+    Spin_per:SpinTrapPercentage
+    Lit_Per:LiteratureTrapPercentage
+    Rr_Per:RainbowRoadTrapPercentage

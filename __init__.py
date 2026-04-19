@@ -1,172 +1,218 @@
-# Super Mario 64 EX MultiWorld Setup Guide
+import typing
+import os
+import json
+from .Items import item_data_table, health_item_data_table, trap_item_data_table, action_item_data_table, cannon_item_data_table, painting_unlock_item_data_table, item_table, SM64Item, Toad_Soul_item_data_table
+from .Locations import location_table, SM64Location
+from .Options import sm64_options_groups, SM64Options
+from .Rules import set_rules
+from .Regions import create_regions, sm64_level_to_entrances, SM64Levels
+from BaseClasses import Item, Tutorial, ItemClassification, Region
+from ..AutoWorld import World, WebWorld
 
-## Required Software
 
-- Super Mario 64 US or JP Rom (Europe and Shindou not supported)
-- Either of
-    - [SM64AP-Launcher](https://github.com/N00byKing/SM64AP-Launcher/releases) or
-    - Cloning and building [sm64ex](https://github.com/N00byKing/sm64ex) manually
-- Optional, for sending [commands](/tutorial/Archipelago/commands/en) like `!hint`: the TextClient from [the most recent Archipelago release](https://github.com/ArchipelagoMW/Archipelago/releases)
+class SM64Web(WebWorld):
+	tutorials = [Tutorial(
+		"Multiworld Setup Guide",
+		"A guide to setting up SM64EX for MultiWorld.",
+		"English",
+		"setup_en.md",
+		"setup/en",
+		["N00byKing"]
+	)]
+	option_groups = sm64_options_groups
 
-NOTE: The above linked launcher is a special version designed to work with the Archipelago build of sm64ex.
-You can use other sm64-port based builds with it, but you can't use a different launcher with the Archipelago build of sm64ex.
 
-## Installation and Game Start Procedures
+class SM64World(World):
+	game: str = "Cursed Mario 64"
+	topology_present = False
+	web = SM64Web()
+	item_name_to_id = item_table
+	location_name_to_id = location_table
+	required_client_version = (0, 3, 5)
+	area_connections: typing.Dict[int, int]
+	options_dataclass = SM64Options
+	number_of_stars: int
+	move_rando_bitvec: int
+	filler_count: int
+	star_costs: typing.Dict[str, int]
+	star_costs_spoiler_key_maxlen = len(max([
+		'First Floor Big Star Door',
+		'Basement Big Star Door',
+		'Second Floor Big Star Door',
+		'MIPS 1',
+		'MIPS 2',
+		'Endless Stairs',
+	], key=len))
 
-### Installation via SM64AP-Launcher
+	def generate_early(self):
+		max_stars = 240
+		if not self.options.enable_coin_stars:
+			max_stars -= 15
+		self.move_rando_bitvec = 0
+		if self.options.enable_move_rando:
+			double_jump_bitvec_offset = action_item_data_table['Double Jump'].code
+			for action in self.options.move_rando_actions.value:
+				max_stars -= 1
+				self.move_rando_bitvec |= (1 << (action_item_data_table[action].code - double_jump_bitvec_offset))
+		if self.options.exclamation_boxes:
+			max_stars += 29
+		if self.options.enable_locked_paintings:
+			max_stars -= len(painting_unlock_item_data_table)
+		self.number_of_stars = min(self.options.amount_of_stars, max_stars)
+		self.filler_count = max_stars - self.number_of_stars
+		self.star_costs = {
+			'FirstBowserDoorCost': round(self.options.first_bowser_star_door_cost * self.number_of_stars / 100),
+			'BasementDoorCost': round(self.options.basement_star_door_cost * self.number_of_stars / 100),
+			'SecondFloorDoorCost': round(self.options.second_floor_star_door_cost * self.number_of_stars / 100),
+			'MIPS1Cost': round(self.options.mips1_cost * self.number_of_stars / 100),
+			'MIPS2Cost': round(self.options.mips2_cost * self.number_of_stars / 100),
+			'StarsToFinish': round(self.options.stars_to_finish * self.number_of_stars / 100)
+		}
+		if self.number_of_stars == 120 and self.options.mips1_cost == 12:
+			self.star_costs['MIPS1Cost'] = 15
+		self.topology_present = self.options.area_rando
 
-*Windows Preparations*
+	def create_regions(self):
+		create_regions(self.multiworld, self.options, self.player)
 
-First, install [MSYS](https://www.msys2.org/) as described on the page. DO NOT INSTALL INTO A FOLDER PATH WITH SPACES.
-It is extremely encouraged to use the default install directory!
-Then continue to `Using the Launcher`
+	def set_rules(self):
+		self.area_connections = {}
+		set_rules(self.multiworld, self.options, self.player, self.area_connections, self.star_costs, self.move_rando_bitvec)
+		if self.topology_present:
+			for entrance, destination in self.area_connections.items():
+				self.multiworld.spoiler.set_entrance(sm64_level_to_entrances[entrance] + " Entrance", sm64_level_to_entrances[destination], 'entrance', self.player)
 
-*Linux Preparations*
+	def create_item(self, name: str) -> Item:
+		data = item_data_table[name]
+		item = SM64Item(name, data.classification, data.code, self.player)
+		return item
 
-You will need to install some dependencies before using the launcher.
-The launcher itself needs `qt6`, `patch` and `git`, and building the game requires `sdl2 glew cmake python make` (If you install `jsoncpp` as well, it will be linked dynamically).
-Then continue to `Using the Launcher`
+	def create_items(self):
+			itempool = []
+			trap_fill_pct = self.options.Trap_Per.value
+			health_types = list(health_item_data_table)
+			filler_names = health_types + ["1Up Mushroom"]
+			base_health_count = len(health_types) * self.filler_count
+			base_1up_count = self.filler_count
+			base_koopa_shell_count = 20
+			total_filler_slots = base_health_count + base_1up_count + base_koopa_shell_count
+			trap_count = (total_filler_slots * trap_fill_pct) // 100
+			filler_count_remaining = total_filler_slots - trap_count
+			trap_weights = {
+				"Bonk Trap": self.options.Bonk_Per.value,
+				"Fire Trap": self.options.Fire_Per.value,
+				"Shock Trap": self.options.Shock_Per.value,
+				"Chuck Trap": self.options.Chuck_Per.value,
+				"Spin Trap": self.options.Spin_per.value,
+				"Literature Trap": self.options.Lit_Per.value,
+				"Rainbow Road Trap": self.options.Rr_Per.value,
+			}
+			total_weight = sum(trap_weights.values())
+			if trap_count > 0:
+				if total_weight > 0:
+					trap_names = list(trap_weights.keys())
+					trap_counts = {}
+					placed = 0
+					for trap_name in trap_names:
+						weight = trap_weights[trap_name]
+						count = (trap_count * weight) // total_weight
+						trap_counts[trap_name] = count
+						placed += count
+					remainder = trap_count - placed
+					if remainder > 0:
+						sorted_traps = sorted(
+							trap_names,
+							key=lambda name: trap_weights[name],
+							reverse=True
+						)
+						for i in range(remainder):
+							trap_counts[sorted_traps[i % len(sorted_traps)]] += 1
+					for trap_name in trap_names:
+						itempool += [self.create_item(trap_name) for _ in range(trap_counts[trap_name])]
+			itempool += [
+				self.create_item(toad_soul_name)
+				for toad_soul_name in Toad_Soul_item_data_table
+				for _ in range(1)
+			]
+			filler_pool_counts = {name: self.filler_count for name in filler_names}
+			filler_pool_counts["Koopa Shell"] = 20
+			filler_pool_total = sum(filler_pool_counts.values())
+			placed = 0
+			filler_pool_names = list(filler_pool_counts.keys())
+			for i, filler_name in enumerate(filler_pool_names):
+				base_count = filler_pool_counts[filler_name]
+				if i == len(filler_pool_names) - 1:
+					count = filler_count_remaining - placed
+				else:
+					count = (filler_count_remaining * base_count) // filler_pool_total
+					placed += count
+				itempool += [self.create_item(filler_name) for _ in range(count)]
+			star_range = self.number_of_stars
+			if self.options.enable_coin_stars == "vanilla":
+				star_range -= 15
+			itempool += [self.create_item("Power Star") for _ in range(star_range)]
+			if not self.options.progressive_keys:
+				itempool += [
+					self.create_item("Basement Key"),
+					self.create_item("Second Floor Key"),
+				]
+			else:
+				itempool += [self.create_item("Progressive Key") for _ in range(4)]
+			itempool += [
+				self.create_item(cap_name)
+				for cap_name in ["Wing Cap", "Metal Cap", "Tanish Cap"]
+			]
+			if self.options.buddy_checks:
+				itempool += [
+					self.create_item(cannon_name)
+					for cannon_name in cannon_item_data_table.keys()
+				]
+			if self.options.enable_locked_paintings:
+				itempool += [
+					self.create_item(painting_name)
+					for painting_name in painting_unlock_item_data_table.keys()
+				]
+			double_jump_bitvec_offset = action_item_data_table["Double Jump"].code
+			itempool += [
+				self.create_item(action)
+				for action, itemdata in action_item_data_table.items()
+				if self.move_rando_bitvec & (1 << (itemdata.code - double_jump_bitvec_offset))
+			]
+			self.multiworld.itempool += itempool
+			
+	def generate_basic(self):
+		pass
 
-*Using the Launcher*
+	def get_filler_item_name(self) -> str:
+		return "1Up Mushroom"
 
-1. Go to the page linked for SM64AP-Launcher, and press on the topmost entry.
-2. Scroll down, and download the zip file for your OS.
-3. Unpack the zip file in an empty folder.
-4. Run the Launcher. On first start, press `Check Requirements`, which will guide you through the rest of the needed steps.
-    - Windows: If you did not use the default install directory for MSYS, close this window, check `Show advanced options` and reopen using `Re-check Requirements`. You can then set the path manually.
-5. When finished, use `Compile default SM64AP build` to continue.
-    - **Advanced configuration:** If you want to use additional build options such as Better Camera, No Drawing Distance, etc or apply game patches such as 60FPS, Enhanced Moveset, etc, then use the `Compile custom build` option:
-      - Set a name for your build, e.g. "archipelago" or whatever you like.
-      - Press the `Download Files` button.
-      - Set Make Flags, e.g. `-j8 BETTERCAMERA=1 NODRAWINGDISTANCE=1` to enable Better Camera and No Drawing Distance.
-      - Press `Apply Patches` to select patches to apply. Example patches include:
-        - 60FPS: Improves frame rate.
-        - Enhanced Moveset: Gives Mario new abilities. [Details here](https://github.com/TheGag96/sm64-port).
-        - Nonstop Mode: Makes it possible to fetch multiple stars in a level without exiting the level first.
-      - Press `Create Build`. This will take several minutes.
-      - You can also use the Repository and Branch fields to build with different repos or branches if you want to build using a fork or development version of SM64AP.
-      - For more details, see:
-        - [Available Makeflags](https://github.com/sm64pc/sm64ex/wiki/Build-options)
-        - [Included Game Patches](https://github.com/N00byKing/sm64ex/blob/archipelago/enhancements/README.md)
-6. Press `Download Files` to prepare the build, afterwards `Create Build`.
-7. SM64EX will now be compiled. This can take a while.
+	def fill_slot_data(self):
+		return {
+			"AreaRando": self.area_connections,
+			"MoveRandoVec": self.move_rando_bitvec,
+			"PaintingRando": self.options.enable_locked_paintings.value,
+			"DeathLink": self.options.death_link.value,
+			"CompletionType": self.options.completion_type.value,
+			**self.star_costs
+		}
 
-After it's done, the build list should have another entry with the name you gave it.
-
-NOTE: If it does not start when pressing `Play selected build`, recheck if you typed the launch options correctly (Described in "Joining a MultiWorld Game")
-
-### Manual Compilation (Linux/Windows)
-
-*Windows Preparations*
-
-First, install [MSYS](https://www.msys2.org/) as described on the page. DO NOT INSTALL INTO A FOLDER PATH WITH SPACES.
-
-After launching msys2 using a MinGW x64 shell (there should be a start menu entry), update by entering `pacman -Syuu` in the command prompt. Next, install the relevant dependencies by entering `pacman -S unzip mingw-w64-x86_64-gcc mingw-w64-x86_64-glew mingw-w64-x86_64-SDL2 git make python3 mingw-w64-x86_64-cmake`.
-
-Continue to `Compiling`.
-
-*Linux Preparations*
-
-Install the relevant dependencies `sdl2 glew cmake python make patch git`. SM64EX will link `jsoncpp` dynamic if installed. If not, it will compile and link statically.
-
-Continue to `Compiling`.
-
-*Compiling*
-
-Obtain the code base by cloning the relevant repository via `git clone --recursive https://github.com/N00byKing/sm64ex`. Copy your legally dumped rom into your sm64ex folder (if you are not sure where your folder is located, do a quick Windows search for sm64ex). The name of the ROM needs to be `baserom.REGION.z64` where `REGION` is either `us` or `jp` respectively.
-
-After all these preparatory steps have succeeded, type `cd sm64ex && make` in your command prompt and get ready to wait for a bit. If you want to speed up compilation, tell the compiler how many CPU cores to use by using `make -jn` instead, where n is the number of cores you want.
-
-After the compliation was successful, there will be a binary in your `sm64ex/build/REGION_pc/` folder.
-
-### Joining a MultiWorld Game
-
-To join, set the following launch options: `--sm64ap_name YourName --sm64ap_ip ServerIP:Port`.
-For example, if you are hosting a game using the website, `YourName` will be the name from the Options Page, `ServerIP` is `archipelago.gg` and `Port` the port given on the Archipelago room page.
-Optionally, add `--sm64ap_passwd "YourPassword"` if the room you are using requires a password.
-Should your name or password have spaces, enclose it in quotes: `"YourPassword"` and `"YourName"`.
-
-Should the connection fail (for example when using the wrong name or IP/Port combination) the game will inform you of that.
-Additionally, any time the game is not connected (for example when the connection is unstable) it will attempt to reconnect and display a status text.
-
-### Playing offline
-
-To play offline, first generate a seed on the game's options page.
-Create a room and download the `.apsm64ex` file, and start the game with the `--sm64ap_file "path/to/FileName"` launch argument.
-
-### Optional: Using Batch Files to play offline and MultiWorld games
-
-As an alternative to launching the game with SM64AP-Launcher, it is also possible to launch the completed build with the use of Windows batch files. This has the added benefit of streamlining the join process so that manual editing of connection info is not needed for each new game. However, you'll need to be somewhat comfortable with creating and using batch files.
-
-IMPORTANT NOTE: The remainder of this section uses copy-and-paste code that assumes you're using the US version. If you instead use the Japanese version, you'll need to edit the EXE name accordingly by changing "sm64.us.f3dex2e.exe" to "sm64.jp.f3dex2e.exe".
-
-### Making an offline.bat for launching offline patch files
-
-Open Notepad. Paste in the following text: `start sm64.us.f3dex2e.exe --sm64ap_file %1`
-
-Go to File > Save As...
-
-Navigate to the folder you selected for your SM64 build when you followed the Build guide for SM64AP-Launcher earlier. Once there, navigate further into `build` and then `us_pc`. This folder should be the same folder that `sm64.us.f3dex2e.exe` resides in. 
-
-Make the file name `"offline.bat"` . THE QUOTE MARKS ARE IMPORTANT! Otherwise, it will create a text file instead ("offline.bat.txt"), which won't work as a batch file.
-
-Now you should have a file called `offline.bat` with a gear icon in the same folder as your "sm64.us.f3dex2e.exe". Right click `offline.bat` and choose `Send To > Desktop (Create Shortcut)`.
--  If the icon for this file is a notepad rather than a gear, you saved it as a .txt file on accident. To fix this, change the file extension to .bat.
-
-From now on, whenever you start an offline, single-player game, just download the `.apsm64ex` patch file from the Generator, then drag-and-drop that onto `offline.bat` to open the game and start playing.
-
-NOTE: When playing offline patch files, a `.save` file is created in the same directory as your patch file, which contains your save data for that seed. Don't delete it until you're done with that seed.
-
-### Making an online.bat for launching online Multiworld games
-
-These steps are very similar. You will be making a batch file in the same location as before. However, the text you put into this batch file is different, and you will not drag patch files onto it.
-
-Use the same steps as before to open Notepad and paste in the following:
-
-`set /p port="Enter port number of room - "`
-
-`set /p slot="Enter slot name - "`
-
-`start sm64.us.f3dex2e.exe --sm64ap_name "%slot%" --sm64ap_ip archipelago.gg:%port%`
-
-Save this file as `"online.bat"`, then create a shortcut by following the same steps as before. 
-
-To use this batch file,  double-click it. A window will open. Type the five-digit port number of the room you wish to join, then type your slot name.
-- The port number is provided on the room page. The game host should share this page with all players.
-- The slot name is whatever you typed in the "Name" field when creating a config file. All slot names are visible on the room page.
-
-Once you provide those two bits of information, the game will open. 
-- If the game only says `Connecting`, try again. Double-check the port number and slot name; even a single typo will cause your connection to fail.
-
-## Installation Troubleshooting
-
-Start the game from the command line to view helpful messages regarding SM64EX.
-
-### Game doesn't start after compiling
-
-Most likely you forgot to set the launch options. `--sm64ap_name YourName` and `--sm64ap_ip ServerIP:Port` are required for startup for Multiworlds, and
-`--sm64ap_file FileName` is required for (offline) singleplayer.
-If your Name or Password have spaces in them, surround them in quotes.
-
-### Game crashes upon entering Peach's Castle
-
-This happens when the game is missing the relevant randomizer data. If you are trying to connect to a server, verify the
-information entered is correct, and for a local file ensure you are using the full file path to the file in conjunction
-with its name.
-
-## Game Troubleshooting
-
-### Known Issues
-
-When using a US Rom, the In-Game messages are missing some letters: `J Q V X Z` and `?`.
-The Japanese Version should have no problem displaying these.
-
-### What happens if I lose connection?
-
-SM64EX tries to reconnect a few times, so be patient.
-Should the problem still be there after about a minute or two, just save and restart the game.
-
-### How do I update the Game to a new Build?
-
-When using the Launcher follow the normal build steps, but when choosing a folder name use the same as before. The launcher will recognize this, and offer to replace it.
-When manually compiling just pull in changes and run `make` again. Sometimes it helps to run `make clean` before.
+	def generate_output(self, output_directory: str):
+		if self.multiworld.players != 1:
+			return
+		data = {
+			"slot_data": self.fill_slot_data(),
+			"location_to_item": {self.location_name_to_id[i.name]: item_table[i.item.name] for i in self.multiworld.get_locations()},
+			"data_package": {
+				"data": {
+					"games": {
+						self.game: {
+							"item_name_to_id": self.item_name_to_id,
+							"location_name_to_id": self.location_name_to_id
+						}
+					}
+				}
+			}
+		}
+		filename = f"{self.multiworld.get_out_file_name_base(self.player)}.apsm64ex"
+		with open(os.path.join(output_directory, filename), 'w') as f:
+			json.dump(data, f)
